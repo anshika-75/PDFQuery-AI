@@ -1,0 +1,12 @@
+google-generativeai
+tiktoken
+faiss-cpu
+langchain
+langchain-community
+langchain-google-genai
+langchain-classic
+langchain-text-splitters
+PyPDF2
+python-dotenv
+streamlit
+pillow
