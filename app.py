@@ -82,7 +82,7 @@ def build_knowledge_base(pdf_file):
     chunks = text_splitter.split_text(text)
 
     def create_embeddings():
-        embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001")
+        embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
         return FAISS.from_texts(chunks, embeddings)
 
     return call_with_retry(create_embeddings)
