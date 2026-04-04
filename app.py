@@ -16,7 +16,11 @@ from langchain_classic.chains.question_answering import load_qa_chain
 load_dotenv()
 
 # Configure APIs — supports both local .env and Streamlit Cloud secrets
-GEMINI_API = os.getenv("GEMINI_API") or st.secrets.get("GEMINI_API", None)
+try:
+    GEMINI_API = os.getenv("GEMINI_API") or st.secrets["GEMINI_API"]
+except (KeyError, FileNotFoundError):
+    GEMINI_API = None
+
 if GEMINI_API:
     genai.configure(api_key=GEMINI_API)
     os.environ["GOOGLE_API_KEY"] = GEMINI_API
