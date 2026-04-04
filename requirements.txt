@@ -6,6 +6,7 @@ langchain-community>=0.2.0
 langchain-google-genai>=2.0.0
 langchain-classic
 langchain-text-splitters
+langchain-core
 PyPDF2
 python-dotenv
 streamlit

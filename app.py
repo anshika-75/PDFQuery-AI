@@ -9,8 +9,21 @@ from PyPDF2 import PdfReader
 import google.generativeai as genai
 from langchain_text_splitters import CharacterTextSplitter
 from langchain_community.vectorstores import FAISS
-from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_classic.chains.question_answering import load_qa_chain
+from langchain_core.embeddings import Embeddings
+from typing import List
+
+# Custom embeddings class — uses genai.embed_content() directly (bypasses v1beta issues)
+class GeminiDirectEmbeddings(Embeddings):
+    def __init__(self, model: str = "models/gemini-embedding-001"):
+        self.model = model
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        return [genai.embed_content(model=self.model, content=t)["embedding"] for t in texts]
+
+    def embed_query(self, text: str) -> List[float]:
+        return genai.embed_content(model=self.model, content=text)["embedding"]
 
 # Load environment variables
 load_dotenv()
@@ -82,7 +95,7 @@ def build_knowledge_base(pdf_file):
     chunks = text_splitter.split_text(text)
 
     def create_embeddings():
-        embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
+        embeddings = GeminiDirectEmbeddings(model="models/gemini-embedding-001")
         return FAISS.from_texts(chunks, embeddings)
 
     return call_with_retry(create_embeddings)
