@@ -35,13 +35,18 @@ def call_with_retry(fn, max_retries=4, initial_delay=15):
                 if attempt < max_retries - 1:
                     st.warning(f"⏳ Rate limit hit. Waiting {delay}s before retrying (attempt {attempt + 1}/{max_retries})...")
                     time.sleep(delay)
-                    delay *= 2  # exponential backoff
+                    delay *= 2
                 else:
                     st.error("❌ Rate limit exceeded after multiple retries. Please wait a minute and try again.")
                     return None
+            elif "API_KEY" in err_str or "api key" in err_str.lower() or "invalid" in err_str.lower():
+                st.error("🔑 Invalid or missing API key. Please check your GEMINI_API secret in the Streamlit Cloud settings.")
+                return None
             else:
-                raise e
+                st.error(f"❌ An error occurred: {err_str}")
+                return None
     return None
+
 
 # --- Helper: Load logo ---
 def load_app_logo():
