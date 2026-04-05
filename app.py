@@ -117,78 +117,19 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- Hide entire toolbar (Deploy button + hamburger menu) ---
+# --- Hide only the Deploy button, keep Streamlit menu for system theme selector ---
 st.markdown("""
     <style>
-        [data-testid="stToolbar"] {display: none !important;}
-        #MainMenu {display: none !important;}
-        header {visibility: hidden !important; height: 0 !important;}
+        [data-testid="stDeployButton"] {display: none !important;}
         footer {visibility: hidden !important;}
     </style>
 """, unsafe_allow_html=True)
 
 # --- Sidebar ---
 st.sidebar.title("PDFQuery AI Navigation")
-
-# Dark / Light mode toggle
-if "dark_mode" not in st.session_state:
-    st.session_state.dark_mode = True  # Default to dark
-
-dark_mode = st.sidebar.toggle("🌙 Dark Mode", value=st.session_state.dark_mode)
-st.session_state.dark_mode = dark_mode
-
-# Apply theme via CSS
-if dark_mode:
-    st.markdown("""
-        <style>
-            /* Main area */
-            [data-testid="stAppViewContainer"] { background-color: #0e1117; color: #ffffff; }
-            [data-testid="stHeader"] { background-color: #0e1117; }
-
-            /* Sidebar */
-            [data-testid="stSidebar"] { background-color: #161b22; }
-            [data-testid="stSidebar"] * { color: #ffffff !important; }
-            [data-testid="stSidebar"] .stMarkdown p { color: #ffffff !important; }
-            [data-testid="stSidebar"] label { color: #ffffff !important; }
-            [data-testid="stSidebar"] .stSelectbox label { color: #ffffff !important; }
-
-            /* All text elements */
-            h1, h2, h3, h4, h5, h6 { color: #ffffff !important; }
-            p, span, label, div { color: #e0e0e0; }
-            .stMarkdown, .stMarkdown p { color: #e0e0e0 !important; }
-
-            /* Inputs */
-            .stTextInput > div > div > input { background-color: #1e2530; color: #ffffff !important; border: 1px solid #3a3f4b; }
-            .stTextArea > div > div > textarea { background-color: #1e2530; color: #ffffff !important; border: 1px solid #3a3f4b; }
-            .stSelectbox > div > div { background-color: #1e2530; color: #ffffff !important; }
-            .stSelectbox > div > div > div { color: #ffffff !important; }
-
-            /* Buttons */
-            .stButton > button { background-color: #6C63FF; color: #ffffff !important; border: none; }
-            .stButton > button:hover { background-color: #5a52e0; color: #ffffff !important; }
-
-            /* File uploader */
-            [data-testid="stFileUploader"] { color: #ffffff !important; }
-            [data-testid="stFileUploader"] label { color: #ffffff !important; }
-            [data-testid="stFileUploader"] small { color: #cccccc !important; }
-        </style>
-    """, unsafe_allow_html=True)
-else:
-    st.markdown("""
-        <style>
-            [data-testid="stAppViewContainer"] { background-color: #ffffff; color: #1a1a1a; }
-            [data-testid="stSidebar"] { background-color: #f0f2f6; }
-            [data-testid="stHeader"] { background-color: #ffffff; }
-            h1, h2, h3, h4, h5, h6 { color: #1a1a1a !important; }
-            .stTextInput > div > div > input { background-color: #ffffff; color: #1a1a1a; }
-            .stTextArea > div > div > textarea { background-color: #ffffff; color: #1a1a1a; }
-            .stButton > button { background-color: #6C63FF; color: #ffffff !important; border: none; }
-            .stButton > button:hover { background-color: #5a52e0; }
-        </style>
-    """, unsafe_allow_html=True)
-
 st.sidebar.markdown("---")
 page = st.sidebar.selectbox("Go to", ["Home", "PDF Chat (PDFQuery AI)", "AI Content Generator"])
+
 
 # =============================================================================
 # HOME PAGE
