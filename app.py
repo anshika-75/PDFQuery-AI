@@ -5,42 +5,31 @@ from dotenv import load_dotenv
 from PIL import Image
 from PyPDF2 import PdfReader
 
-# Gemini and LangChain imports
-import google.generativeai as genai
+# Groq and LangChain imports
 from langchain_text_splitters import CharacterTextSplitter
 from langchain_community.vectorstores import FAISS
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
 from langchain_classic.chains.question_answering import load_qa_chain
-from langchain_core.embeddings import Embeddings
-from typing import List
-
-# Custom embeddings class — uses genai.embed_content() directly (bypasses v1beta issues)
-class GeminiDirectEmbeddings(Embeddings):
-    def __init__(self, model: str = "models/gemini-embedding-001"):
-        self.model = model
-
-    def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        return [genai.embed_content(model=self.model, content=t)["embedding"] for t in texts]
-
-    def embed_query(self, text: str) -> List[float]:
-        return genai.embed_content(model=self.model, content=text)["embedding"]
+from langchain_huggingface import HuggingFaceEmbeddings
 
 # Load environment variables
 load_dotenv()
 
-# Configure APIs — supports both local .env and Streamlit Cloud secrets
+# Configure API key — supports both local .env and Streamlit Cloud secrets
+GROQ_API_KEY = None
 try:
-    GEMINI_API = os.getenv("GEMINI_API") or st.secrets["GEMINI_API"]
+    GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+    if not GROQ_API_KEY or GROQ_API_KEY == "your_groq_api_key_here":
+        GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", None)
 except (KeyError, FileNotFoundError):
-    GEMINI_API = None
+    pass
 
-if GEMINI_API:
-    genai.configure(api_key=GEMINI_API)
-    os.environ["GOOGLE_API_KEY"] = GEMINI_API
+if GROQ_API_KEY:
+    os.environ["GROQ_API_KEY"] = GROQ_API_KEY
 
 
 # --- Helper: Retry with exponential backoff ---
-def call_with_retry(fn, max_retries=4, initial_delay=15):
+def call_with_retry(fn, max_retries=3, initial_delay=5):
     """Call fn(), retrying on quota/rate-limit errors with exponential backoff."""
     delay = initial_delay
     for attempt in range(max_retries):
@@ -48,7 +37,7 @@ def call_with_retry(fn, max_retries=4, initial_delay=15):
             return fn()
         except Exception as e:
             err_str = str(e)
-            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "quota" in err_str.lower():
+            if "429" in err_str or "rate_limit" in err_str.lower() or "quota" in err_str.lower():
                 if attempt < max_retries - 1:
                     st.warning(f"⏳ Rate limit hit. Waiting {delay}s before retrying (attempt {attempt + 1}/{max_retries})...")
                     time.sleep(delay)
@@ -56,11 +45,11 @@ def call_with_retry(fn, max_retries=4, initial_delay=15):
                 else:
                     st.error("❌ Rate limit exceeded after multiple retries. Please wait a minute and try again.")
                     return None
-            elif "API_KEY" in err_str or "api key" in err_str.lower() or "invalid" in err_str.lower():
-                st.error("🔑 Invalid or missing API key. Please check your GEMINI_API secret in the Streamlit Cloud settings.")
+            elif "401" in err_str or "authentication_error" in err_str.lower() or "invalid_api_key" in err_str.lower():
+                st.error("🔑 Invalid API key. Please check your GROQ_API_KEY.")
                 return None
             else:
-                st.error(f"❌ An error occurred: {err_str}")
+                st.error(f"❌ Error: {err_str}")
                 return None
     return None
 
@@ -71,6 +60,17 @@ def load_app_logo():
     if os.path.exists(IMAGE_PATH):
         return Image.open(IMAGE_PATH)
     return None
+
+
+# --- Helper: Get embeddings model (cached to avoid reloading) ---
+@st.cache_resource(show_spinner=False)
+def get_embeddings_model():
+    """Load HuggingFace embeddings model locally — no API key needed, no rate limits."""
+    import logging
+    logging.getLogger("sentence_transformers").setLevel(logging.WARNING)
+    logging.getLogger("transformers").setLevel(logging.WARNING)
+    return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+
 
 # --- Helper: Build knowledge base from PDF (cached in session_state) ---
 def build_knowledge_base(pdf_file):
@@ -94,11 +94,20 @@ def build_knowledge_base(pdf_file):
     )
     chunks = text_splitter.split_text(text)
 
-    def create_embeddings():
-        embeddings = GeminiDirectEmbeddings(model="models/gemini-embedding-001")
-        return FAISS.from_texts(chunks, embeddings)
+    embeddings = get_embeddings_model()
+    knowledge_base = FAISS.from_texts(chunks, embeddings)
+    return knowledge_base
 
-    return call_with_retry(create_embeddings)
+
+# --- Helper: Get Groq LLM ---
+def get_groq_llm(model: str = "llama-3.1-8b-instant", temperature: float = 0.3):
+    """Create a Groq-backed LLM instance."""
+    return ChatGroq(
+        model=model,
+        temperature=temperature,
+        groq_api_key=GROQ_API_KEY,
+    )
+
 
 # --- Page config ---
 app_logo = load_app_logo()
@@ -108,9 +117,78 @@ st.set_page_config(
     layout="wide"
 )
 
+# --- Hide entire toolbar (Deploy button + hamburger menu) ---
+st.markdown("""
+    <style>
+        [data-testid="stToolbar"] {display: none !important;}
+        #MainMenu {display: none !important;}
+        header {visibility: hidden !important; height: 0 !important;}
+        footer {visibility: hidden !important;}
+    </style>
+""", unsafe_allow_html=True)
+
 # --- Sidebar ---
 st.sidebar.title("PDFQuery AI Navigation")
-page = st.sidebar.selectbox("Go to", ["Home", "PDF Chat (PDFQuery AI)", "Gemini Content Generator"])
+
+# Dark / Light mode toggle
+if "dark_mode" not in st.session_state:
+    st.session_state.dark_mode = True  # Default to dark
+
+dark_mode = st.sidebar.toggle("🌙 Dark Mode", value=st.session_state.dark_mode)
+st.session_state.dark_mode = dark_mode
+
+# Apply theme via CSS
+if dark_mode:
+    st.markdown("""
+        <style>
+            /* Main area */
+            [data-testid="stAppViewContainer"] { background-color: #0e1117; color: #ffffff; }
+            [data-testid="stHeader"] { background-color: #0e1117; }
+
+            /* Sidebar */
+            [data-testid="stSidebar"] { background-color: #161b22; }
+            [data-testid="stSidebar"] * { color: #ffffff !important; }
+            [data-testid="stSidebar"] .stMarkdown p { color: #ffffff !important; }
+            [data-testid="stSidebar"] label { color: #ffffff !important; }
+            [data-testid="stSidebar"] .stSelectbox label { color: #ffffff !important; }
+
+            /* All text elements */
+            h1, h2, h3, h4, h5, h6 { color: #ffffff !important; }
+            p, span, label, div { color: #e0e0e0; }
+            .stMarkdown, .stMarkdown p { color: #e0e0e0 !important; }
+
+            /* Inputs */
+            .stTextInput > div > div > input { background-color: #1e2530; color: #ffffff !important; border: 1px solid #3a3f4b; }
+            .stTextArea > div > div > textarea { background-color: #1e2530; color: #ffffff !important; border: 1px solid #3a3f4b; }
+            .stSelectbox > div > div { background-color: #1e2530; color: #ffffff !important; }
+            .stSelectbox > div > div > div { color: #ffffff !important; }
+
+            /* Buttons */
+            .stButton > button { background-color: #6C63FF; color: #ffffff !important; border: none; }
+            .stButton > button:hover { background-color: #5a52e0; color: #ffffff !important; }
+
+            /* File uploader */
+            [data-testid="stFileUploader"] { color: #ffffff !important; }
+            [data-testid="stFileUploader"] label { color: #ffffff !important; }
+            [data-testid="stFileUploader"] small { color: #cccccc !important; }
+        </style>
+    """, unsafe_allow_html=True)
+else:
+    st.markdown("""
+        <style>
+            [data-testid="stAppViewContainer"] { background-color: #ffffff; color: #1a1a1a; }
+            [data-testid="stSidebar"] { background-color: #f0f2f6; }
+            [data-testid="stHeader"] { background-color: #ffffff; }
+            h1, h2, h3, h4, h5, h6 { color: #1a1a1a !important; }
+            .stTextInput > div > div > input { background-color: #ffffff; color: #1a1a1a; }
+            .stTextArea > div > div > textarea { background-color: #ffffff; color: #1a1a1a; }
+            .stButton > button { background-color: #6C63FF; color: #ffffff !important; border: none; }
+            .stButton > button:hover { background-color: #5a52e0; }
+        </style>
+    """, unsafe_allow_html=True)
+
+st.sidebar.markdown("---")
+page = st.sidebar.selectbox("Go to", ["Home", "PDF Chat (PDFQuery AI)", "AI Content Generator"])
 
 # =============================================================================
 # HOME PAGE
@@ -120,11 +198,11 @@ if page == "Home":
     if app_logo:
         st.image(app_logo, width=200)
     st.write("""
-    Welcome to **PDFQuery AI**, the intelligent PDF interaction application powered by Google Gemini.
+    Welcome to **PDFQuery AI**, the intelligent PDF interaction application.
 
     With this application, you can:
     - **PDF Chat**: Upload a PDF and ask questions about its content in natural language.
-    - **Gemini Generator**: Use Google's Gemini AI to generate content and insights.
+    - **AI Content Generator**: Generate content and insights using AI.
 
     Select a feature from the sidebar to get started.
     """)
@@ -136,8 +214,8 @@ if page == "Home":
 elif page == "PDF Chat (PDFQuery AI)":
     st.header("Ask Your PDF 📄")
 
-    if not GEMINI_API:
-        st.warning("⚠️ GEMINI_API not found. Please set it in your .env file.")
+    if not GROQ_API_KEY:
+        st.warning("⚠️ GROQ_API_KEY not found. Please set it in your .env file or Streamlit Cloud secrets.")
     else:
         uploaded_file = st.file_uploader("Upload your PDF", type="pdf")
 
@@ -150,7 +228,7 @@ elif page == "PDF Chat (PDFQuery AI)":
         # Only rebuild the knowledge base when a new PDF is uploaded
         if uploaded_file is not None:
             if uploaded_file.name != st.session_state.last_pdf_name:
-                with st.spinner("Processing PDF... (this may take a moment)"):
+                with st.spinner("📖 Reading your PDF..."):
                     kb = build_knowledge_base(uploaded_file)
                     if kb is not None:
                         st.session_state.knowledge_base = kb
@@ -166,7 +244,7 @@ elif page == "PDF Chat (PDFQuery AI)":
                 with st.spinner("Analyzing your question..."):
                     def get_answer():
                         docs = st.session_state.knowledge_base.similarity_search(query)
-                        llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash-lite")
+                        llm = get_groq_llm()
                         chain = load_qa_chain(llm, chain_type="stuff")
                         return chain.run(input_documents=docs, question=query)
 
@@ -176,29 +254,30 @@ elif page == "PDF Chat (PDFQuery AI)":
                         st.write(response)
 
 # =============================================================================
-# GEMINI CONTENT GENERATOR PAGE
+# AI CONTENT GENERATOR PAGE
 # =============================================================================
-elif page == "Gemini Content Generator":
-    st.header("Gemini AI Content Generator ✨")
+elif page == "AI Content Generator":
+    st.header("AI Content Generator ✨")
 
-    if not GEMINI_API:
-        st.warning("⚠️ GEMINI_API not found. Please set it in your .env file.")
+    if not GROQ_API_KEY:
+        st.warning("⚠️ GROQ_API_KEY not found. Please set it in your .env file or Streamlit Cloud secrets.")
     else:
         user_input = st.text_area("Enter a prompt:", placeholder="e.g., 'Summarize the key points of machine learning'", height=120)
 
         if st.button("Generate Content") and user_input:
             with st.spinner("Generating content..."):
                 def generate():
-                    model = genai.GenerativeModel("gemini-2.0-flash-lite")
-                    return model.generate_content(user_input)
+                    llm = get_groq_llm(model="llama-3.1-8b-instant", temperature=0.7)
+                    response = llm.invoke(user_input)
+                    return response.content
 
                 result = call_with_retry(generate)
                 if result:
-                    st.write("**Response from Gemini AI:**")
-                    st.write(result.text)
+                    st.write("**Response from Groq AI:**")
+                    st.write(result)
         elif not user_input:
             st.info("Please enter a prompt to generate content.")
 
 # Footer
 st.sidebar.markdown("---")
-st.sidebar.write("Created by PDFQuery AI Team 🛠️")
+st.sidebar.markdown("**Developed by Anshika** 💜")
