@@ -3,6 +3,3 @@ showSidebarNavigation = false
 
 [server]
 headless = true
-
-[theme]
-primaryColor = "#6C63FF"

@@ -117,10 +117,16 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- Hide only the Deploy button, keep Streamlit menu for system theme selector ---
+# --- Hide only the Deploy button, keep menu for system theme selector ---
 st.markdown("""
     <style>
-        [data-testid="stDeployButton"] {display: none !important;}
+        [data-testid="stDeployButton"], [data-testid="stAppDeployButton"] {
+            display: none !important;
+            visibility: hidden !important;
+            width: 0px !important;
+            height: 0px !important;
+            padding: 0px !important;
+        }
         footer {visibility: hidden !important;}
     </style>
 """, unsafe_allow_html=True)
